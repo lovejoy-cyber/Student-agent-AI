@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Student Assistant</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --green: #006400; --gold: #FDB913; --red: #CE1126; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f4f6f5; display: flex; justify-content: center; min-height: 100vh;
+  }
+  .app { width: 100%; max-width: 480px; display: flex; flex-direction: column; height: 100vh; background: #fff; }
+  header { padding: 16px 20px; background: var(--green); color: #fff; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: 0.85; }
+  #login { padding: 24px 20px; display: flex; flex-direction: column; gap: 12px; }
+  #login input { padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; }
+  #login button { padding: 12px; border: none; border-radius: 8px; background: var(--green); color: #fff; font-size: 15px; cursor: pointer; }
+  #chat { flex: 1; display: none; flex-direction: column; }
+  #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 80%; padding: 10px 14px; border-radius: 14px; font-size: 14.5px; line-height: 1.4; }
+  .msg.student { align-self: flex-end; background: var(--green); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.agent { align-self: flex-start; background: #eef1ef; color: #222; border-bottom-left-radius: 4px; }
+  form#composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #eee; }
+  #composer input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 20px; font-size: 15px; }
+  #composer button { padding: 0 18px; border: none; border-radius: 20px; background: var(--green); color: #fff; cursor: pointer; }
+  .hint { font-size: 12px; color: #888; padding: 0 20px 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Student Assistant</h1>
+    <p>Zimbabwean Embassy — Algeria</p>
+  </header>
+
+  <div id="login">
+    <p>Enter your phone number on file to receive a login code.</p>
+    <input id="phone" placeholder="+213..." />
+    <button onclick="requestOtp()">Send code</button>
+    <input id="otp" placeholder="Enter the 6-digit code" style="display:none" />
+    <button id="verifyBtn" style="display:none" onclick="verifyOtpCode()">Verify</button>
+    <p class="hint">In local dev, the OTP is printed to your API server's console — there's no SMS provider wired up yet.</p>
+  </div>
+
+  <div id="chat">
+    <div id="messages"></div>
+    <form id="composer" onsubmit="sendMessage(event)">
+      <input id="messageInput" placeholder="Ask about your records..." autocomplete="off" />
+      <button type="submit">Send</button>
+    </form>
+  </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+let token = localStorage.getItem("student_token");
+let conversationId = null;
+let phoneNumber = "";
+
+if (token) showChat();
+
+async function requestOtp() {
+  phoneNumber = document.getElementById("phone").value.trim();
+  await fetch(`${API_BASE}/auth/student/request-otp`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ phone_number: phoneNumber })
+  });
+  document.getElementById("otp").style.display = "block";
+  document.getElementById("verifyBtn").style.display = "block";
+}
+
+async function verifyOtpCode() {
+  const code = document.getElementById("otp").value.trim();
+  const res = await fetch(`${API_BASE}/auth/student/verify-otp`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ phone_number: phoneNumber, code })
+  });
+  if (!res.ok) { alert("Invalid or expired code"); return; }
+  const data = await res.json();
+  token = data.access_token;
+  localStorage.setItem("student_token", token);
+  showChat();
+}
+
+function showChat() {
+  document.getElementById("login").style.display = "none";
+  document.getElementById("chat").style.display = "flex";
+  addMessage("agent", "Hi! Ask me about your records, missing documents, academic results, or let me know if you need help with anything.");
+}
+
+function addMessage(sender, text) {
+  const div = document.createElement("div");
+  div.className = `msg ${sender}`;
+  div.textContent = text;
+  document.getElementById("messages").appendChild(div);
+  div.scrollIntoView({ behavior: "smooth" });
+}
+
+async function sendMessage(e) {
+  e.preventDefault();
+  const input = document.getElementById("messageInput");
+  const text = input.value.trim();
+  if (!text) return;
+  addMessage("student", text);
+  input.value = "";
+
+  const res = await fetch(`${API_BASE}/agent/message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify({ conversation_id: conversationId, channel: "web", content: text })
+  });
+  if (!res.ok) { addMessage("agent", "Something went wrong — please try again."); return; }
+  const data = await res.json();
+  conversationId = data.conversation_id;
+  addMessage("agent", data.response);
+}
+</script>
+</body>
+</html>
